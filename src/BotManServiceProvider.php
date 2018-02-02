@@ -20,30 +20,30 @@ class BotManServiceProvider extends ServiceProvider
 
         $this->app->singleton('botman', function ($app) {
             $storage = new FileStorage(storage_path('botman'));
+
+            /**
+             * Want to log the json payload from Facebook?
+             *
+             * $payload = $app->make('request')->getContent();
+             * Log::info($payload);
+             */
+
+            # Get payload json into array
+            $payload = json_decode($app->make('request')->getContent());
+
+            # Get the pageId
+            $page_id = $payload->entry["0"]->messaging["0"]->recipient->id ?? 0;
+
+            # lookup the token to use
+            $page = FacebookPage::where('page_id', $page_id)->first();
     
-            // get page id from incoming payload
-            $pageId = array_get(json_decode($app->make('request')->getContent(), true), 'recipient.id');
-    
-            // lookup the token to use
-            $token = FacebookPage::wherePageId($pageId)->get()->token;
-    
-	    Log::info("Here's the token I'm using for ".$pageId.": ".$token);
-            // Override config value
-            config(['botman.facebook.token' => $token]);
+            # Override config value
+            config(['botman.facebook.token' => ($page->token ?? 0)]);
     
     
             return BotManFactory::create(config('botman', []), new LaravelCache(), $app->make('request'), $storage);
         });
 
-	/**
-	 * Original code
-	 *
-        $this->app->singleton('botman', function ($app) {
-            $storage = new FileStorage(storage_path('botman'));
-
-            return BotManFactory::create(config('botman', []), new LaravelCache(), $app->make('request'),
-                $storage);
-        });
-	*/
     }
 }
+
