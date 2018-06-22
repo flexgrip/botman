@@ -4,6 +4,7 @@ namespace BotMan\BotMan;
 
 use BotMan\BotMan\Cache\LaravelCache;
 use Illuminate\Support\ServiceProvider;
+use BotMan\BotMan\Container\LaravelContainer;
 use BotMan\BotMan\Storages\Drivers\FileStorage;
 use App\FacebookPage;
 use Log;
@@ -41,7 +42,12 @@ class BotManServiceProvider extends ServiceProvider
             config(['botman.facebook.token' => ($page->token ?? 0)]);
     
     
-            return BotManFactory::create(config('botman', []), new LaravelCache(), $app->make('request'), $storage);
+            $botman = BotManFactory::create(config('botman', []), new LaravelCache(), $app->make('request'),
+                $storage);
+
+            $botman->setContainer(new LaravelContainer($this->app));
+
+            return $botman;
         });
 
     }

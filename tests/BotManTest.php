@@ -10,6 +10,7 @@ use BotMan\BotMan\BotManFactory;
 use Illuminate\Support\Collection;
 use BotMan\BotMan\Cache\ArrayCache;
 use BotMan\BotMan\Drivers\NullDriver;
+use Psr\Container\ContainerInterface;
 use BotMan\BotMan\Drivers\DriverManager;
 use BotMan\BotMan\Drivers\Tests\FakeDriver;
 use BotMan\BotMan\Interfaces\UserInterface;
@@ -19,6 +20,7 @@ use BotMan\BotMan\Tests\Fixtures\TestDriver;
 use BotMan\BotMan\Messages\Attachments\Audio;
 use BotMan\BotMan\Messages\Attachments\Image;
 use BotMan\BotMan\Messages\Attachments\Video;
+use Psr\Container\NotFoundExceptionInterface;
 use BotMan\BotMan\Tests\Fixtures\TestFallback;
 use BotMan\BotMan\Middleware\MiddlewareManager;
 use BotMan\BotMan\Messages\Attachments\Location;
@@ -26,6 +28,7 @@ use BotMan\BotMan\Tests\Fixtures\TestMiddleware;
 use BotMan\BotMan\Exceptions\Base\BotManException;
 use BotMan\BotMan\Tests\Fixtures\TestConversation;
 use BotMan\BotMan\Messages\Incoming\IncomingMessage;
+use BotMan\BotMan\Tests\Fixtures\Middleware\Matching;
 use BotMan\BotMan\Tests\Fixtures\TestMatchMiddleware;
 use BotMan\BotMan\Messages\Conversations\Conversation;
 use BotMan\BotMan\Tests\Fixtures\TestAdditionalDriver;
@@ -140,16 +143,15 @@ class BotManTest extends TestCase
             'message' => 'Hi Julia',
         ]);
 
-        $botman->hears('Hi Julia', function () {
+        $botman->hears('Hi Julia', function ($botman) {
+            $conversation = new TestConversation();
+
+            $botman->storeConversation($conversation, function ($answer) use (&$called) {
+                $GLOBALS['answer'] = $answer;
+                $GLOBALS['called'] = true;
+            });
         });
         $botman->listen();
-
-        $conversation = new TestConversation();
-
-        $botman->storeConversation($conversation, function ($answer) use (&$called) {
-            $GLOBALS['answer'] = $answer;
-            $GLOBALS['called'] = true;
-        });
 
         /*
          * Now that the first message is saved, fake a reply
@@ -290,6 +292,56 @@ class BotManTest extends TestCase
         $botman->hears('foo', TestClass::class.'@foo');
         $botman->listen();
         $this->assertTrue(TestClass::$called);
+    }
+
+    /** @test */
+    public function it_hears_matching_commands_with_container()
+    {
+        $botman = $this->getBot([
+            'sender' => 'UX12345',
+            'recipient' => 'general',
+            'message' => 'Foo',
+        ]);
+        TestClass::$called = false;
+
+        /** @var ContainerInterface|m\Mock $containerMock */
+        $containerMock = m::mock(ContainerInterface::class);
+        $containerMock->shouldReceive('get')
+            ->with(TestClass::class)
+            ->once()
+            ->andReturn(new TestClass($botman));
+
+        $botman->setContainer($containerMock);
+
+        $botman->hears('foo', TestClass::class.'@foo');
+        $botman->listen();
+        $this->assertTrue(TestClass::$called);
+    }
+
+    /** @test */
+    public function it_throws_not_found_exception_when_command_is_not_registered_in_container()
+    {
+        $botman = $this->getBot([
+            'sender' => 'UX12345',
+            'recipient' => 'general',
+            'message' => 'Foo',
+        ]);
+        TestClass::$called = false;
+
+        /** @var ContainerInterface|m\Mock $containerMock */
+        $containerMock = m::mock(ContainerInterface::class);
+        $exceptionMock = new class() extends \Exception implements NotFoundExceptionInterface {
+        };
+        $containerMock->shouldReceive('get')->once()->andThrow($exceptionMock);
+
+        $botman->setContainer($containerMock);
+
+        $botman->hears('foo', TestClass::class.'@foo');
+
+        $this->expectException(NotFoundExceptionInterface::class);
+
+        $botman->listen();
+        $this->assertFalse(TestClass::$called);
     }
 
     /** @test */
@@ -644,13 +696,13 @@ class BotManTest extends TestCase
             'message' => 'foo',
         ]);
 
-        $botman->hears('foo', function () {
+        $conversation = new TestConversation();
+
+        $botman->hears('foo', function ($botman) use ($conversation) {
+            $botman->storeConversation($conversation, function ($answer) {
+            });
         });
         $botman->listen();
-
-        $conversation = new TestConversation();
-        $botman->storeConversation($conversation, function ($answer) {
-        });
 
         $cacheKey = 'conversation-'.sha1('UX12345').'-'.sha1('general');
         $this->assertTrue($this->cache->has($cacheKey));
@@ -697,16 +749,15 @@ class BotManTest extends TestCase
             'message' => 'Hi Julia',
         ]);
 
-        $botman->hears('Hi Julia', function () {
+        $botman->hears('Hi Julia', function ($botman) {
+            $conversation = new TestConversation();
+
+            $botman->storeConversation($conversation, function (Answer $answer) use (&$called) {
+                $GLOBALS['answer'] = $answer;
+                $GLOBALS['called'] = true;
+            });
         });
         $botman->listen();
-
-        $conversation = new TestConversation();
-
-        $botman->storeConversation($conversation, function (Answer $answer) use (&$called) {
-            $GLOBALS['answer'] = $answer;
-            $GLOBALS['called'] = true;
-        });
 
         /*
          * Now that the first message is saved, fake a reply
@@ -772,15 +823,14 @@ class BotManTest extends TestCase
             'message' => 'Hi Julia',
         ]);
 
-        $botman->hears('Hi Julia', function () {
+        $botman->hears('Hi Julia', function ($botman) {
+            $conversation = new TestConversation();
+
+            $botman->storeConversation($conversation, function (Answer $answer) use (&$called) {
+                $this->_throwException('called conversation');
+            });
         });
         $botman->listen();
-
-        $conversation = new TestConversation();
-
-        $botman->storeConversation($conversation, function (Answer $answer) use (&$called) {
-            $this->_throwException('called conversation');
-        });
 
         /*
          * Now that the first message is saved, fake a reply
@@ -805,28 +855,27 @@ class BotManTest extends TestCase
             'message' => 'Hi Julia',
         ]);
 
-        $botman->hears('Hi Julia', function () {
+        $botman->hears('Hi Julia', function ($botman) {
+            $conversation = new TestConversation();
+
+            $botman->storeConversation($conversation, [
+                [
+                    'pattern' => 'token_one',
+                    'callback' => function (Answer $answer) use (&$called) {
+                        $GLOBALS['answer'] = $answer;
+                        $GLOBALS['called_foo'] = true;
+                    },
+                ],
+                [
+                    'pattern' => 'token_two',
+                    'callback' => function (Answer $answer) use (&$called) {
+                        $GLOBALS['answer'] = $answer;
+                        $GLOBALS['called_bar'] = true;
+                    },
+                ],
+            ]);
         });
         $botman->listen();
-
-        $conversation = new TestConversation();
-
-        $botman->storeConversation($conversation, [
-            [
-                'pattern' => 'token_one',
-                'callback' => function (Answer $answer) use (&$called) {
-                    $GLOBALS['answer'] = $answer;
-                    $GLOBALS['called_foo'] = true;
-                },
-            ],
-            [
-                'pattern' => 'token_two',
-                'callback' => function (Answer $answer) use (&$called) {
-                    $GLOBALS['answer'] = $answer;
-                    $GLOBALS['called_bar'] = true;
-                },
-            ],
-        ]);
 
         /*
          * Now that the first message is saved, fake a reply
@@ -856,21 +905,19 @@ class BotManTest extends TestCase
             'message' => 'Hi Julia',
         ]);
 
-        $botman->hears('Hi Julia', function () {
+        $botman->hears('Hi Julia', function ($botman) {
+            $conversation = new TestConversation();
+            $botman->storeConversation($conversation, [
+                [
+                    'pattern' => '([0]?[0-2][0-3]|[0-9])',
+                    'callback' => function (Answer $answer, $number) use (&$called) {
+                        $GLOBALS['answer'] = $answer;
+                        $GLOBALS['called'] = true;
+                    },
+                ],
+            ]);
         });
         $botman->listen();
-
-        $conversation = new TestConversation();
-
-        $botman->storeConversation($conversation, [
-            [
-                'pattern' => '([0]?[0-2][0-3]|[0-9])',
-                'callback' => function (Answer $answer, $number) use (&$called) {
-                    $GLOBALS['answer'] = $answer;
-                    $GLOBALS['called'] = true;
-                },
-            ],
-        ]);
 
         /*
          * Now that the first message is saved, fake a reply
@@ -899,21 +946,19 @@ class BotManTest extends TestCase
             'message' => 'Hi Julia',
         ]);
 
-        $botman->hears('Hi Julia', function () {
+        $botman->hears('Hi Julia', function ($botman) {
+            $conversation = new TestConversation();
+            $botman->storeConversation($conversation, [
+                [
+                    'pattern' => 'Call me {name}',
+                    'callback' => function ($answer, $name) use (&$called) {
+                        $GLOBALS['answer'] = $name;
+                        $GLOBALS['called'] = true;
+                    },
+                ],
+            ]);
         });
         $botman->listen();
-
-        $conversation = new TestConversation();
-
-        $botman->storeConversation($conversation, [
-            [
-                'pattern' => 'Call me {name}',
-                'callback' => function ($answer, $name) use (&$called) {
-                    $GLOBALS['answer'] = $name;
-                    $GLOBALS['called'] = true;
-                },
-            ],
-        ]);
 
         /*
          * Now that the first message is saved, fake a reply
@@ -1258,6 +1303,7 @@ class BotManTest extends TestCase
     {
         $called_one = false;
         $called_two = false;
+        $called_three = false;
         $botman = $this->getBot([
             'sender' => 'UX12345',
             'recipient' => 'C12345',
@@ -1273,9 +1319,14 @@ class BotManTest extends TestCase
             $called_two = true;
         })->middleware(new TestMatchMiddleware());
 
+        $botman->hears('keyword', function ($bot) use (&$called_three) {
+            $called_three = true;
+        })->middleware(new Matching());
+
         $botman->listen();
         $this->assertTrue($called_one);
         $this->assertFalse($called_two);
+        $this->assertTrue($called_three);
     }
 
     /** @test */
