@@ -506,7 +506,7 @@ class BotMan
     /**
      * @param string|Question $message
      * @param string|array $recipients
-     * @param DriverInterface|null $driver
+     * @param DriverInterface|string|null $driver
      * @param array $additionalParameters
      * @return Response
      * @throws BotManException
@@ -574,13 +574,12 @@ class BotMan
     }
 
     /**
-     * @param int $seconds Number of seconds to wait
+     * @param float $seconds Number of seconds to wait
      * @return $this
      */
-    public function typesAndWaits($seconds)
+    public function typesAndWaits(float $seconds)
     {
-        $this->getDriver()->types($this->message);
-        sleep($seconds);
+        $this->getDriver()->typesAndWaits($this->message, $seconds);
 
         return $this;
     }
